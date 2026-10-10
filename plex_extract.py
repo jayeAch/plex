@@ -46,6 +46,18 @@ def clean(s):
     return BAD_XML.sub("", s) if s else s
 
 
+def die(r, what):
+    sys.exit(f"{what}: HTTP {r.status_code}, Content-Type {r.headers.get('Content-Type')!r}\n"
+             f"body starts: {r.text[:300]!r}")
+
+
+def body_json(r, what):
+    try:
+        return r.json()
+    except ValueError:
+        die(r, f"{what} did not return JSON")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--region", default="local", choices=FORWARD)
@@ -74,22 +86,34 @@ def main():
         "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9",
         "Origin": "https://app.plex.tv", "Referer": "https://app.plex.tv/",
         "User-Agent": UA, "x-plex-client-identifier": client_id,
+        "Connection": "keep-alive", "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-site",
+        "sec-ch-ua": '"Not A(Brand";v="8", "Chromium";v="132", "Google Chrome";v="132"',
+        "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"macOS"',
     }
     if fwd:
         headers["X-Forwarded-For"] = fwd
 
     # 1. anonymous token
     r = requests.post(TOKEN_URL, params=params, headers=headers, timeout=30)
-    r.raise_for_status()
-    token = r.json()["authToken"]
+    if r.status_code not in (200, 201):
+        die(r, "token request failed")
+    try:
+        token = r.json()["authToken"]
+    except (ValueError, KeyError):
+        m = re.search(r'authToken="([^"]+)"', r.text)  # Plex may answer in XML
+        if not m:
+            die(r, "token response had no authToken")
+        token = m.group(1)
     params["X-Plex-Token"] = token
     print(f"token ok ({a.region})")
 
     # 2. genres -> channel lineups
     r = requests.get(API + "/", params=params, headers=headers, timeout=60)
-    r.raise_for_status()
+    if r.status_code != 200:
+        die(r, "genre request failed")
     genres = {}
-    for feat in r.json().get("MediaProvider", {}).get("Feature", []):
+    for feat in body_json(r, "genre request").get("MediaProvider", {}).get("Feature", []):
         if "GridChannelFilter" in feat:
             genres = {g["identifier"]: g["title"] for g in feat["GridChannelFilter"]}
             break
@@ -102,7 +126,12 @@ def main():
         if r.status_code != 200:
             print(f"  skip genre {gslug}: HTTP {r.status_code}", file=sys.stderr)
             continue
-        for c in r.json().get("MediaContainer", {}).get("Channel") or []:
+        try:
+            lineup = r.json()
+        except ValueError:
+            print(f"  skip genre {gslug}: not JSON ({r.text[:100]!r})", file=sys.stderr)
+            continue
+        for c in lineup.get("MediaContainer", {}).get("Channel") or []:
             media = c.get("Media", [])
             if any(m.get("drm") for m in media):
                 continue
