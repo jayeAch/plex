@@ -29,22 +29,22 @@ jobs:
         timeout-minutes: 10
         env:
           PYTHONUNBUFFERED: "1"
-        run: |
-          grep -c line_buffering plex_extract.py || echo "WARNING: repo has an OLD plex_extract.py"
-          python -u plex_extract.py --days 3 --gz -o out
+        run: python -u plex_extract.py --region clt --days 1 --gz -o playlists
 
       - name: Sanity check
         run: |
-          test -s out/playlist.m3u
-          test -s out/epg.xml
-          grep -c "<programme " out/epg.xml
+          test -s playlists/playlist.m3u
+          test -s playlists/epg.xml
+          grep -c "<programme " playlists/epg.xml
 
-      - name: Publish to data branch
-        working-directory: out
+      - name: Commit playlists
         run: |
-          git init -q -b data
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .
+          git add playlists
+          if git diff --cached --quiet; then
+            echo "no changes"
+            exit 0
+          fi
           git commit -qm "plex extract $(date -u +%F-%H%M)"
-          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data
+          git push
