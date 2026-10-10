@@ -26,7 +26,12 @@ jobs:
       - run: pip install requests
 
       - name: Generate playlist + EPG
-        run: python plex_extract.py --days 3 --gz -o out
+        timeout-minutes: 10
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          grep -c line_buffering plex_extract.py || echo "WARNING: repo has an OLD plex_extract.py"
+          python -u plex_extract.py --days 3 --gz -o out
 
       - name: Sanity check
         run: |
@@ -43,4 +48,3 @@ jobs:
           git add .
           git commit -qm "plex extract $(date -u +%F-%H%M)"
           git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data
-
