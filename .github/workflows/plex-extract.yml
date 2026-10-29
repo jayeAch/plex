@@ -26,7 +26,7 @@ jobs:
       - run: pip install requests
 
       - name: Generate playlist + EPG
-        timeout-minutes: 10
+        timeout-minutes: 15
         env:
           PYTHONUNBUFFERED: "1"
         run: python -u plex_extract.py --region clt --days 1 --gz -o playlists
@@ -34,8 +34,9 @@ jobs:
       - name: Sanity check
         run: |
           test -s playlists/playlist.m3u
-          test -s playlists/epg.xml
-          grep -c "<programme " playlists/epg.xml
+          n=$(grep -o "<programme " playlists/epg.xml | wc -l)
+          echo "programmes: $n"
+          test "$n" -ge 5000
 
       - name: Commit playlists
         run: |
