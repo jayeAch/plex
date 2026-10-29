@@ -185,10 +185,10 @@ def main():
     if fwd:
         grid_headers["X-Forwarded-For"] = fwd
 
-    def fetch_grid(job):
+    def fetch_grid(job, tries=2):
         ch, date = job
         r = req("GET", f"{API}/grid", params={"channelGridKey": ch["gridKey"], "date": date},
-                headers=grid_headers, want_xml=True, tries=4, timeout=20)
+                headers=grid_headers, want_xml=True, tries=tries, timeout=15)
         if r is None or r.status_code != 200:
             return ch, date, None, ("no response" if r is None else f"HTTP {r.status_code}")
         # strip illegal control chars (e.g. U+0008) that Plex sometimes emits
@@ -216,12 +216,15 @@ def main():
                 print(f"  grid {n}/{len(jobs)} ({len(failed)} failed)")
 
     if failed:  # slow second pass: fewer workers, after letting rate limits cool off
-        print(f"retrying {len(failed)} failed grid requests slowly")
+        first = {}
+        for _, _, _, why in failed:
+            first[why] = first.get(why, 0) + 1
+        print(f"first pass: {len(failed)} failed {first}; retrying slowly")
         time.sleep(15)
         retry_jobs = [(ch, d) for ch, d, _, _ in failed]
         failed = []
         with ThreadPoolExecutor(max_workers=2) as ex:
-            for res in ex.map(fetch_grid, retry_jobs):
+            for res in ex.map(lambda j: fetch_grid(j, tries=5), retry_jobs):
                 (results if res[2] is not None else failed).append(res)
     ok_ratio = len(results) / len(jobs) if jobs else 0
     reasons = {}
